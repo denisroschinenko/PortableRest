@@ -10,5 +10,6 @@ namespace PortableRest
         FormUrlEncoded,
         Json,
         Xml,
+        MultipartFormData
     }
 }

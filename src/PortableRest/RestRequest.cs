@@ -55,6 +55,8 @@ namespace PortableRest
         /// </summary>
         public string Resource { internal get; set; }
 
+        public List<FileParameter> Files { get; private set; }
+
         #endregion
 
         #region Methods
@@ -69,6 +71,7 @@ namespace PortableRest
             UrlSegments = new List<KeyValuePair<string, string>>();
             Parameters = new List<KeyValuePair<string, object>>();
             Method = HttpMethod.Get;
+            Files = new List<FileParameter>();
         }
 
         /// <summary>
@@ -76,7 +79,8 @@ namespace PortableRest
         /// </summary>
         /// <param name="resource">The specific resource to access.</param>
         /// <param name="method">The HTTP method to use for the request.</param>
-        public RestRequest(string resource, HttpMethod method) : this()
+        public RestRequest(string resource, HttpMethod method)
+            : this()
         {
             Method = method;
             Resource = resource;
@@ -88,12 +92,18 @@ namespace PortableRest
         /// <param name="resource"></param>
         /// <param name="method"></param>
         /// <param name="ignoreRoot"></param>
-        public RestRequest(string resource, HttpMethod method, bool ignoreRoot) : this(resource, method)
+        public RestRequest(string resource, HttpMethod method, bool ignoreRoot)
+            : this(resource, method)
         {
             IgnoreRootElement = ignoreRoot;
         }
 
         #endregion
+
+        public void AddFile(string name, byte[] bytes, string fileName)
+        {
+            Files.Add(new FileParameter(name, bytes, fileName));
+        }
 
         /// <summary>
         /// 
@@ -148,8 +158,10 @@ namespace PortableRest
                     return "application/x-www-form-urlencoded";
                 case ContentTypes.Xml:
                     return "application/xml";
-                default:
+                case ContentTypes.Json:
                     return "application/json";
+                default:
+                    return "multipart/form-data";
             }
         }
 
@@ -166,9 +178,12 @@ namespace PortableRest
 
                 case ContentTypes.Xml:
                     throw new NotImplementedException("Sending XML is not yet supported, but will be added in a future release.");
-                default:
-
+                case ContentTypes.Json:
                     return Parameters.Count > 0 ? JsonConvert.SerializeObject(Parameters[0].Value) : "";
+                default:
+                    return Parameters.Aggregate("", (s, pair) =>
+                                                     s + string.Format("{0}={1}", pair.Key, JsonConvert.SerializeObject(pair.Value)));
+
             }
 
 

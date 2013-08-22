@@ -1,4 +1,6 @@
-﻿using AdvancedREI.Net.Http.Compression;
+﻿using System.Net.Http.Headers;
+using AdvancedREI.Net.Http.Compression;
+using Ionic.Zlib;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -82,8 +84,10 @@ namespace PortableRest
                 restRequest.DateFormat = DateFormat;
             }
 
-            var handler = new CompressedHttpClientHandler {AllowAutoRedirect = true};
-            _client = new HttpClient(handler);
+            //TODO: Need to investigate exception and fix it. It will allow to use compression
+            //var handler = new CompressedHttpClientHandler {AllowAutoRedirect = true};
+            _client = new HttpClient();
+            _client.DefaultRequestHeaders.ExpectContinue = false;
 
             if (!string.IsNullOrWhiteSpace(UserAgent))
             {
@@ -91,6 +95,8 @@ namespace PortableRest
             }
 
             var message = new HttpRequestMessage(restRequest.Method, new Uri(restRequest.Resource, UriKind.RelativeOrAbsolute));
+            message.Headers.AcceptLanguage.TryParseAdd("en-gb;q=0.8");
+
 
             foreach (var header in Headers)
             {
@@ -99,19 +105,44 @@ namespace PortableRest
 
             if (restRequest.Method == HttpMethod.Post || restRequest.Method == HttpMethod.Put)
             {
-                var contentString = new StringContent(restRequest.GetRequestBody(), Encoding.UTF8, restRequest.GetContentType());
-                message.Content = contentString;
+                if (restRequest.ContentType == ContentTypes.MultipartFormData)
+                {
+
+                    var multipartPartFormDataContent = new MultipartFormDataContent("form-data");
+                    var contentJson = new StringContent(restRequest.GetRequestBody());
+                    multipartPartFormDataContent.Add(contentJson);
+
+                    message.Content = contentJson;
+                    if (restRequest.Files.Any())
+                    {
+                        foreach (var fileParameter in restRequest.Files)
+                        {
+                            var streamContent = new StreamContent(new MemoryStream(fileParameter.Data, 0, fileParameter.Data.Length));
+                            streamContent.Headers.ContentType = MediaTypeHeaderValue.Parse("application/octet-stream");
+                            multipartPartFormDataContent.Add(streamContent, fileParameter.Name, fileParameter.FileName);
+                        }
+                    }
+
+                    message.Content = multipartPartFormDataContent;
+                    message.Content.Headers.ContentType = new MediaTypeHeaderValue(restRequest.GetContentType());
+                }
+                else
+                {
+                    var contentString = new StringContent(restRequest.GetRequestBody(), Encoding.UTF8,
+                                                         restRequest.GetContentType());
+                    message.Content = contentString;
+                }
             }
 
-            HttpResponseMessage response = null;
-            response = await _client.SendAsync(message);
-            response.EnsureSuccessStatusCode();       
+
+
+            HttpResponseMessage response = await _client.SendAsync(message);
+            response.EnsureSuccessStatusCode();
 
             var responseContent = await response.Content.ReadAsStringAsync();
 
             //TODO: Handle Error
             if (response.Content.Headers.ContentType.MediaType == "application/xml")
-
             {
 
                 // RWM: IDEA - The DataContractSerializer doesn't like attributes, but will handle everything else.
@@ -124,15 +155,15 @@ namespace PortableRest
 
                 XElement root = XElement.Parse(responseContent);
                 XElement newRoot = (XElement)Transform(restRequest.IgnoreRootElement ? root.Descendants().First() : root, restRequest);
-                 
+
                 using (var memoryStream = new MemoryStream(Encoding.Unicode.GetBytes(newRoot.ToString())))
                 {
-                    var settings = new XmlReaderSettings {IgnoreWhitespace = true};
+                    var settings = new XmlReaderSettings { IgnoreWhitespace = true };
                     using (var reader = XmlReader.Create(memoryStream, settings))
                     {
                         try
                         {
-                            var serializer = new DataContractSerializer(typeof (T));
+                            var serializer = new DataContractSerializer(typeof(T));
                             result = serializer.ReadObject(reader) as T;
                         }
                         catch (SerializationException ex)
@@ -149,6 +180,7 @@ namespace PortableRest
 
             return result;
         }
+
 
         #endregion
 
@@ -172,7 +204,7 @@ namespace PortableRest
                     }
                 }
 
-                if (!string.IsNullOrWhiteSpace(request.DateFormat) && 
+                if (!string.IsNullOrWhiteSpace(request.DateFormat) &&
                     (element.Name.LocalName.ToLower().Contains("date") ||
                     element.Name.LocalName.ToLower().Contains("time")))
                 {
